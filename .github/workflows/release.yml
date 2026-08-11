@@ -1,0 +1,185 @@
+name: Release
+
+# Builds the game for Windows, macOS, and Linux, and attaches the archives to
+# a Releases page when a version tag is pushed.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Required by the publish job to create the release.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # A failure on one platform should not cancel the builds for the others.
+      fail-fast: false
+      matrix:
+        include:
+          # A binary runs against any glibc newer than the one it was built
+          # against, never older, so the oldest release still in support
+          # covers the widest range of distributions.
+          - os: ubuntu-22.04
+            label: linux-x64
+          - os: windows-latest
+            label: windows-x64
+          - os: macos-latest
+            label: macos-arm64
+          # Apple Silicon binaries do not run on Intel Macs, which need a
+          # separate build on the last Intel runner image.
+          - os: macos-13
+            label: macos-x64
+
+    defaults:
+      run:
+        # Windows runners default to PowerShell.  Git Bash is present on all
+        # four images, so one shell keeps every step below identical.
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install the build dependencies
+        run: python -m pip install --upgrade pip pygame-ce pyinstaller
+
+      - name: Determine the version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "number=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Freeze the game
+        run: |
+          # PyInstaller starts from a plain script, and runner/__main__ cannot
+          # serve as one: run as a top level script, its relative imports have
+          # no package to resolve against.
+          cat > launcher.py <<'EOF'
+          from runner.game import main
+
+          raise SystemExit(main())
+          EOF
+
+          # --add-data takes the host's path separator between source and
+          # destination, the one part of this step that differs on Windows.
+          if [ "${{ runner.os }}" = "Windows" ]; then sep=";"; else sep=":"; fi
+
+          # assets.py locates its files with Path(__file__).parent / "assets",
+          # which still resolves once frozen, provided the tree is laid down in
+          # the same shape inside the bundle.
+          pyinstaller launcher.py \
+            --name Runner \
+            --noconfirm \
+            --windowed \
+            --add-data "runner/assets${sep}runner/assets"
+
+      - name: Package the build
+        run: |
+          mkdir -p out
+          name="Runner-${{ steps.version.outputs.number }}-${{ matrix.label }}"
+          case "${{ runner.os }}" in
+            Linux)
+              # tar rather than zip, which does not carry the executable bit.
+              tar -czf "out/$name.tar.gz" -C dist Runner
+              ;;
+            Windows)
+              cd dist && 7z a -tzip "../out/$name.zip" Runner > /dev/null
+              ;;
+            macOS)
+              # ditto preserves the bundle structure that makes Runner.app a
+              # double clickable application.
+              cd dist && ditto -c -k --keepParent Runner.app "../out/$name.zip"
+              ;;
+          esac
+
+      - name: Verify the build starts
+        # A build that packages cleanly but cannot load its own assets is the
+        # failure this catches.  The binary runs headless for long enough to
+        # get past asset loading and into the title screen.
+        if: runner.os == 'Linux'
+        run: |
+          code=0
+          SDL_VIDEODRIVER=dummy timeout 20 ./dist/Runner/Runner || code=$?
+          # 124 is timeout stopping a program that was still running, which is
+          # the expected outcome.  Any other code means the game exited on its
+          # own.
+          if [ "$code" -ne 124 ]; then
+            echo "The build exited early with code $code."
+            exit 1
+          fi
+          echo "The build ran for 20 seconds without exiting."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Publish
+    needs: build
+    # Only a tag publishes.  A manual run stops after the builds, leaving the
+    # archives on the run's own page.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: archives
+          merge-multiple: true
+
+      # The notes render as Markdown on the release page.  They are wrapped to
+      # the column limit this file keeps, which the rendering ignores.
+      - name: Write the release notes
+        run: |
+          cat > notes.md <<'EOF'
+          Download the file for your system, unpack it, and run Runner. There
+          is nothing to install and no need for Python.
+
+          | File | System |
+          | ---- | ------ |
+          | `windows-x64.zip` | Windows |
+          | `macos-arm64.zip` | Macs with Apple Silicon |
+          | `macos-x64.zip` | Macs with Intel processors |
+          | `linux-x64.tar.gz` | Linux |
+
+          ## First Run
+
+          These builds are not code signed, so Windows and macOS each ask once
+          before running a program they have not seen before.
+
+          **Windows.** SmartScreen reports "Windows protected your PC". Choose
+          **More info**, then **Run anyway**.
+
+          **macOS.** The first attempt is refused. Open **System Settings**, go
+          to **Privacy & Security**, scroll to the message about Runner, and
+          choose **Open Anyway**.
+
+          **Linux.** No prompt. Unpack the archive and run `./Runner`.
+
+          ## Running from Source
+
+          The README has the steps for running the game with Python.
+          EOF
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" archives/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Runner ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md
