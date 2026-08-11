@@ -32,8 +32,9 @@ jobs:
           - os: macos-latest
             label: macos-arm64
           # Apple Silicon binaries do not run on Intel Macs, which need a
-          # separate build on the last Intel runner image.
-          - os: macos-13
+          # separate build.  This is the last free Intel image, and GitHub
+          # drops x86_64 entirely when it retires in late 2027.
+          - os: macos-15-intel
             label: macos-x64
 
     defaults:
@@ -43,9 +44,9 @@ jobs:
         shell: bash
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
 
@@ -121,7 +122,7 @@ jobs:
           fi
           echo "The build ran for 20 seconds without exiting."
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.label }}
           path: out/*
@@ -136,7 +137,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: archives
           merge-multiple: true
