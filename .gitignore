@@ -1,0 +1,11 @@
+# Bytecode
+__pycache__/
+
+# Local environment
+.venv/
+.vscode/
+
+# Build output
+build/
+dist/
+*.egg-info/

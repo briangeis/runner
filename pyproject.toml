@@ -1,0 +1,37 @@
+[project]
+name = "runner"
+version = "1.0.0"
+description = "A Python/pygame-ce port of Runner, a 1998 DOS shooter"
+readme = "README.md"
+requires-python = ">=3.11"
+# Two licenses, because the code and the artwork have different authors and
+# different terms. license-files ships both alongside the built package.
+license = "GPL-3.0-or-later AND CC-BY-SA-4.0"
+license-files = ["LICENSE", "runner/assets/LICENSE"]
+authors = [{ name = "Brian Geis" }]
+# Upper bound because display.py relies on the display module's behavior
+# around fullscreen and window placement, which pygame-ce is gradually
+# moving to the Window class.
+dependencies = ["pygame-ce>=2.5.7,<3"]
+
+[project.scripts]
+runner = "runner.__main__:main"
+
+[build-system]
+# 77 is where SPDX license expressions became available.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["runner"]
+
+[tool.setuptools.package-data]
+runner = [
+    "assets/LICENSE",
+    "assets/manifest.json",
+    "assets/banner.txt",
+    "assets/**/*.png",
+]
+
+[tool.pyrefly]
+project-includes = ["runner"]
