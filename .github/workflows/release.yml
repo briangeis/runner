@@ -51,7 +51,14 @@ jobs:
           python-version: "3.14"
 
       - name: Install the build dependencies
-        run: python -m pip install --upgrade pip pygame-ce pyinstaller
+        # requirements.txt carries the exact pygame-ce the game is tuned
+        # against, so a release ships what was play-tested rather than
+        # whatever happens to be newest at build time.  PyInstaller is a
+        # build tool rather than a runtime dependency, so it is not pinned
+        # there and floats.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
 
       - name: Determine the version
         id: version
